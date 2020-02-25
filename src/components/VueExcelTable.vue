@@ -1,12 +1,15 @@
 <template>
-    <div class="excel" @mouseup="mouseDown(false), mouseIsDownOnCell = false" :style="cssProps">
+    <div class="excel" v-if="copiedRows.length > 0" @mouseup="mouseIsDownInSelectedCell && mouseDown(false), mouseIsDownOnCell = false"
+         :style="cssProps">
         <div class="flexed">
-            <div class="static-cell"></div>
+            <div class="static-cell">
+                <button @click="undoFunction()">Undo</button>
+            </div>
             <div class="excel__headers" ref="headers">
                 <div class="excel__header--cell"
                      :class="{'active-column-row': activeCell ? activeCell.column === header : false}"
-                     v-for="header in headers">
-                    {{header}}
+                     v-for="header in copiedHeaders">
+                    <HeaderCell :header="header" @headerClicked="selectedHeaderCell($event)"></HeaderCell>
                 </div>
             </div>
         </div>
@@ -14,31 +17,40 @@
             <div class="excel__rows-identifier" ref="rows_identifier">
                 <div class="excel__body--row-identifier"
                      :class="{'active-column-row': activeCell ? activeCell.row === key : false}"
-                     v-for="key in rows.length">{{key}}
+                     v-for="key in copiedRows.length">{{key}}
                 </div>
             </div>
             <div class="excel__body-rows-container"
                  ref="body"
                  @scroll="handleScroll">
-                <div class="excel__body--row" v-for="(row, rowKey) in rows">
+                <div class="excel__body--row" v-for="(row, rowKey) in copiedRows">
+                    <!--@click="selectCell(copiedHeaders[cellKey], rowKey+1)"-->
                     <div class="excel__body--cell"
-                         :id="`${headers[cellKey]}-${rowKey+1}`"
-                         @click="selectCell(headers[cellKey], rowKey+1, row[cellKey])"
+                         @dblclick="editingCell = {column: cellKey, row: row}"
+                         :id="`${copiedHeaders[cellKey]}-${rowKey+1}`"
                          @contextmenu="rightMouseClick($event, cellKey, rowKey + 1)"
-                         @mousedown="mouseDownOnCell(headers[cellKey], rowKey + 1)"
-                         @mousemove="mouseIsMoving(headers[cellKey], rowKey+1), mouseIsMovingForMultiRows(headers[cellKey], rowKey + 1)"
-                         :class="[isMainCellSelected(headers[cellKey], rowKey + 1) ? 'selected-main-cell': '',
-                         isCellInMultiselect(headers[cellKey], rowKey + 1) ? 'selected-cell' : '']"
+                         @mousedown="mouseDownOnCell(copiedHeaders[cellKey], rowKey + 1, row[cellKey])"
+                         @mousemove="mouseIsMoving(copiedHeaders[cellKey], rowKey+1, $event), mouseIsMovingForMultiRows(copiedHeaders[cellKey], rowKey + 1, $event)"
+                         :class="[isMainCellSelected(copiedHeaders[cellKey], rowKey + 1) ? 'selected-main-cell': '',
+                         isCellDisabled(cellKey, rowKey) ? 'disabled-main-cell': '',
+                         isCellInMultiselect(copiedHeaders[cellKey], rowKey + 1) ? 'selected-cell' : '']"
                          v-for="(cell, cellKey) in longestArray">
 
-                        {{row[cellKey]}}
-
+                        <input v-model="row[cellKey]"
+                               v-click-outside="stopEditingCell"
+                               autofocus
+                               v-if="editingCell && editingCell.column === cellKey && editingCell.row === row"
+                               class="edit-input"
+                               type="text">
+                        <span v-else>
+                            {{row[cellKey]}}
+                        </span>
                         <div>
                             <div class="arrow-up" @click="showDropdown(cellKey, rowKey, $event)"
-                                 v-if="hasComment(headers[cellKey], rowKey + 1)"></div>
+                                 v-if="hasComment(copiedHeaders[cellKey], rowKey + 1)"></div>
                         </div>
 
-                        <div v-if="showButtonForCopy(headers[cellKey], rowKey + 1)"
+                        <div v-if="showButtonForCopy(copiedHeaders[cellKey], rowKey + 1) && !editingCell"
                              @mousedown="mouseDown(true)"
                              :style="styleOfCopyButton"
                              class="small-button"></div>
@@ -50,20 +62,41 @@
                 <div :style="bottomHorizontalLine"></div>
             </div>
         </div>
-        <MouseDropDown v-if="cellPopup" @manipulateRows="manipulateRows($event)" @closeMouseDropdown="cellPopup = null" :clickDetails="cellPopup.event"></MouseDropDown>
-        <DropDown :value="showDropDown" @change="valueChanged($event)" v-if="showDropDown.column"></DropDown>
+        <MouseDropDown v-if="cellPopup" @manipulateRows="manipulateRows($event)" @closeMouseDropdown="cellPopup = null"
+                       :cell="cellPopup"
+                       :numberOfRows="copiedRows.length"
+                       :numberOfCols="longestArray"
+                       :clickDetails="cellPopup.event"></MouseDropDown>
+        <CommentPopup v-if="showDropDown.column"
+                      :value="showDropDown"
+                      @hideCommentSection="showDropDown = {column: null, row: null}"
+                      @change="valueChanged($event)"></CommentPopup>
+        <DropDownForHeader v-if="selectedHeader"
+                           :rows="rows"
+                           @manipulateRows="manipulateRows($event)"
+                           @updatedRows="copiedRows=$event"
+                           @closeMouseDropdown="selectedHeader = null"
+                           :value="selectedHeader"></DropDownForHeader>
     </div>
 </template>
 
 <script>
-    import DropDown from './DropDown'
+    import CommentPopup from './CommentPopup'
     import MouseDropDown from './MouseDropdown'
+    import HeaderCell from './HeaderCell'
+    import DropDownForHeader from './DropDownForHeader'
+    import ClickOutside from 'vue-click-outside'
 
     export default {
         name: "VueExcelTable",
         components: {
-            DropDown,
-            MouseDropDown
+            CommentPopup,
+            MouseDropDown,
+            HeaderCell,
+            DropDownForHeader
+        },
+        directives: {
+            ClickOutside
         },
         props: {
             cellHeight: {
@@ -74,14 +107,45 @@
                 type: Number,
                 default: 70
             },
+            headers: {
+                type: Array,
+                default: () => [],
+                required: false
+            },
+            readOnlyCells: {
+                type: Array,
+                default: () => []
+            },
+            readOnlyRows: {
+                type: Array,
+                default: () => []
+            },
+            readOnlyColumns: {
+                type: Array,
+                default: () => []
+            },
             rows: {
                 type: Array,
                 default: () => [
-                    [1, 2, 3, 4, 5, 6, 7, 8, 9],
+                    [1, 2, 3, 4, null, 6, 7, 8, 9],
                     [11, 10, 11, 12, 13, 14, 15, 16, 17],
-                    [18, 19, 20, 21, 22, 23, 24, 25, 26, 23, 23, 32],
+                    [18, 19, 20, 21, 22, 23, 24, 25, 26, 23, 23, 32, 12, 12, 12, 1, 1, 1, 1, 1],
                     [27, 28, 29, 30, 31, 32, 33, 34, 35],
                     [36, 37, 38, 39, 40, 41, 42, 43, 44],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
+                    [45, 46, 47, 48, 49, 50, 51, 52, 53],
                     [45, 46, 47, 48, 49, 50, 51, 52, 53],
                 ],
                 required: false
@@ -89,14 +153,15 @@
             cellsWithComments: {
                 type: Array,
                 default: () => [
-                    {row: 1, column: 1, comment: 'GG'},
-                    {row: 5, column: 3, comment: 'GG'},
+                    {row: 1, column: 1, comment: '11'},
+                    {row: 5, column: 3, comment: '53'},
                 ]
             }
         },
         data() {
             return {
-                headers: [],
+                copiedHeaders: [],
+                copiedRows: [],
                 showDropDown: {column: null, row: null},
                 activeCell: null,
                 cellWhereCopyButtonIs: null,
@@ -105,11 +170,19 @@
                 mouseIsDownOnCell: false,
                 selectedRowsToBeSelected: [],
                 longestArray: 0,
-                cellPopup: null
+                cellPopup: null,
+                selectedHeader: null,
+                undo: [],
+                editingCell: null
             }
         },
         mounted() {
+
+            this.copiedRows = JSON.parse(JSON.stringify(this.rows))
+
+
             this.calculateHeaders()
+
             window.addEventListener('keydown', this.keyDownEventListener);
         },
         computed: {
@@ -117,6 +190,7 @@
                 return {
                     '--var-cell-height': `${this.cellHeight}px`,
                     '--var-cell-width': `${this.cellWidth}px`,
+                    '--var-cell-width-plus-one': `${this.cellWidth + 1}px`,
                 }
             },
             leftVerticalLine() {
@@ -126,15 +200,15 @@
                     }
                 }
 
-                let lowerColumn = this.headers.indexOf(this.activeCell.column) <= this.selectedRowsToBeChanged[this.selectedRowsToBeChanged.length - 1].header
+                let lowerColumn = this.copiedHeaders.indexOf(this.activeCell.column) <= this.selectedRowsToBeChanged[this.selectedRowsToBeChanged.length - 1].header
 
                 if (this.selectedRowsToBeChanged.every(x => x.row === this.activeCell.row)) {
 
-                    let left = this.headers.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1
+                    let left = this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1
 
                     return {
                         'position': 'absolute',
-                        'left': `${left + (lowerColumn ? this.headers.indexOf(this.selectedRowsToBeChanged[0].header) : 0)}px`,
+                        'left': `${left + (lowerColumn ? this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) : 0)}px`,
                         'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
                         'border': '1px solid red',
                         'height': `${this.cellHeight}px`
@@ -143,7 +217,7 @@
 
                 return {
                     'position': 'absolute',
-                    'left': `${this.headers.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1}px`,
+                    'left': `${this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1}px`,
                     'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
                     'border': '1px solid red',
                     'height': `${this.selectedRowsToBeChanged.length * this.cellHeight}px`
@@ -158,8 +232,8 @@
 
                 if (this.selectedRowsToBeChanged.every(x => x.row === this.activeCell.row)) {
 
-                    let lowerColumn = this.headers.indexOf(this.activeCell.column) > this.headers.indexOf(this.selectedRowsToBeChanged[0].header)
-                    let left = lowerColumn ? this.headers.indexOf(this.activeCell.column) * this.cellWidth : this.headers.indexOf(this.selectedRowsToBeChanged[this.selectedRowsToBeChanged.length - 1].header) * this.cellWidth
+                    let lowerColumn = this.copiedHeaders.indexOf(this.activeCell.column) > this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header)
+                    let left = lowerColumn ? this.copiedHeaders.indexOf(this.activeCell.column) * this.cellWidth : this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[this.selectedRowsToBeChanged.length - 1].header) * this.cellWidth
 
 
                     return {
@@ -173,7 +247,7 @@
 
                 return {
                     'position': 'absolute',
-                    'left': `${(this.headers.indexOf(this.selectedRowsToBeChanged[0].header) + 1) * this.cellWidth - 1}px`,
+                    'left': `${(this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) + 1) * this.cellWidth - 1}px`,
                     'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
                     'border': '1px solid red',
                     'height': `${this.selectedRowsToBeChanged.length * this.cellHeight + 1}px`
@@ -189,7 +263,7 @@
                 if (this.selectedRowsToBeChanged.every(x => x.row === this.activeCell.row)) {
                     return {
                         'position': 'absolute',
-                        'left': `${this.headers.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1}px`,
+                        'left': `${this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1}px`,
                         'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
                         'border': '1px solid red',
                         'width': `${this.cellWidth * this.selectedRowsToBeChanged.length}px`
@@ -198,7 +272,7 @@
 
                 return {
                     'position': 'absolute',
-                    'left': `${this.headers.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1}px`,
+                    'left': `${this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1}px`,
                     'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
                     'border': '1px solid red',
                     'width': `${this.cellWidth}px`
@@ -211,12 +285,12 @@
                     }
                 }
 
-                let lowerColumn = this.headers.indexOf(this.activeCell.column) > this.headers.indexOf(this.selectedRowsToBeChanged[0].header)
+                let lowerColumn = this.copiedHeaders.indexOf(this.activeCell.column) > this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header)
 
                 if (this.selectedRowsToBeChanged.length > 1 && this.selectedRowsToBeChanged.every(x => x.row === this.activeCell.row)) {
                     return {
                         'position': 'absolute',
-                        'left': `${this.headers.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth}px`,
+                        'left': `${this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth}px`,
                         'top': `${(this.selectedRowsToBeChanged[0].row) * this.cellHeight}px`,
                         'border': '1px solid red',
                         'width': `${this.cellWidth * this.selectedRowsToBeChanged.length - 1}px`
@@ -224,7 +298,7 @@
                 }
                 return {
                     'position': 'absolute',
-                    'left': `${this.headers.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth}px`,
+                    'left': `${this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth}px`,
                     'top': `${(this.selectedRowsToBeChanged[this.selectedRowsToBeChanged.length - 1].row) * this.cellHeight + (lowerColumn ? +1 : 0)}px`,
                     'border': '1px solid red',
                     'width': `${this.cellWidth - 1}px`
@@ -253,23 +327,50 @@
                 this.cellPopup = {column, row, event}
             },
             calculateHeaders() {
-                this.longestArray = Math.max(...this.rows.map(r => r.length))
+                this.longestArray = Math.max(...this.copiedRows.map(r => r.length))
 
-                if (this.longestArray <= 26) {
-                    this.headers = [...Array(this.longestArray)].map((_, y) => String.fromCharCode(y + 65))
-                } else {
-                    let alphabetRepeated = Math.ceil(this.longestArray / 26)
-                    this.headers = [...Array(26)].map((_, y) => String.fromCharCode(y + 65))
+                if (!this.headers || this.headers.length === 0) {
 
-                    for (let i = 1; i < alphabetRepeated; i++) {
-                        let anotherCombinationOfAlphabet = [...Array(26)].map((_, y) => `${this.headers[i - 1]}${String.fromCharCode(y + 65)}`)
-                        this.headers.push(...anotherCombinationOfAlphabet)
+                    if (this.longestArray <= 26) {
+                        this.copiedHeaders = [...Array(this.longestArray)].map((_, y) => String.fromCharCode(y + 65))
+                    } else {
+                        let alphabetRepeated = Math.ceil(this.longestArray / 26)
+                        this.copiedHeaders = [...Array(26)].map((_, y) => String.fromCharCode(y + 65))
+
+                        for (let i = 1; i < alphabetRepeated; i++) {
+                            let anotherCombinationOfAlphabet = [...Array(26)].map((_, y) => `${this.copiedHeaders[i - 1]}${String.fromCharCode(y + 65)}`)
+                            this.copiedHeaders.push(...anotherCombinationOfAlphabet)
+                        }
                     }
+                } else {
+                    this.copiedHeaders = JSON.parse(JSON.stringify(this.headers))
+                }
+            },
+            isCellDisabled(column, row) {
+                if (this.readOnlyColumns.length === 0 && this.readOnlyRows.length === 0 && this.readOnlyCells.length === 0) {
+                    return false
+                }
+
+                let cellDisabled = this.readOnlyCells.find(rc => rc.row === row && rc.column === column)
+
+                if (cellDisabled) {
+                    return true
+                }
+
+                let rowDisabled = this.readOnlyRows.find(rc => rc === row)
+
+                if (rowDisabled !== undefined) {
+                    return true
+                }
+
+                let columnDisabled = this.readOnlyColumns.find(rc => rc === column)
+
+                if (columnDisabled !== undefined) {
+                    return true
                 }
             },
             keyDownEventListener(event) {
-                console.log('event.ctrlKey', event.ctrlKey)
-                if (event.ctrlKey && event.keyCode === 67) {
+                if (event.alt && event.keyCode === 67) {
                     this.copy()
                     event.preventDefault()
                 }
@@ -278,21 +379,24 @@
                 let copiedText = ''
                 this.selectedRowsToBeSelected.forEach((cell, key) => {
                     if (key === 0) {
-                        copiedText = this.rows[cell.row - 1][this.headers.indexOf(cell.header)] || null
+                        copiedText = this.copiedRows[cell.row - 1][this.copiedHeaders.indexOf(cell.header)] || null
                         return;
                     }
 
                     if (cell.row === this.selectedRowsToBeSelected[key - 1].row) {
-                        copiedText = `${copiedText}   ${this.rows[cell.row - 1][this.headers.indexOf(cell.header)] || null}`
+                        copiedText = `${copiedText}   ${this.copiedRows[cell.row - 1][this.copiedHeaders.indexOf(cell.header)] || null}`
                         return;
                     }
 
-                    copiedText = `${copiedText}\n${this.rows[cell.row - 1][this.headers.indexOf(cell.header)] || null}`
+                    copiedText = `${copiedText}\n${this.copiedRows[cell.row - 1][this.copiedHeaders.indexOf(cell.header)] || null}`
 
                 })
+                this.copyToClipBoard(copiedText)
+            },
+            copyToClipBoard(text) {
                 let dummy = document.createElement("textarea");
                 document.body.appendChild(dummy);
-                dummy.value = copiedText;
+                dummy.value = text;
                 dummy.select();
                 document.execCommand("copy");
                 document.body.removeChild(dummy);
@@ -325,28 +429,42 @@
             mouseDown(v) {
                 this.mouseIsDownInSelectedCell = v;
                 this.mouseIsDownOnCell = false
+                let copiedData = []
                 if (!v) {
                     this.selectedRowsToBeChanged.forEach(r => {
-                        let indexBasedOnColumn = this.headers.indexOf(r.header)
-                        this.rows[r.row - 1][indexBasedOnColumn] = this.activeCell.value
+                        let indexBasedOnColumn = this.copiedHeaders.indexOf(r.header)
+                        copiedData.push({
+                            column: indexBasedOnColumn,
+                            row: r.row - 1,
+                            value: this.copiedRows[r.row - 1][indexBasedOnColumn]
+                        })
+                        if (!this.isCellDisabled(indexBasedOnColumn, r.row - 1)) {
+                            this.copiedRows[r.row - 1][indexBasedOnColumn] = this.activeCell.value
+                        }
                     })
+                    if (this.selectedRowsToBeChanged.length > 0 && this.undo.indexOf(this.selectedRowsToBeChanged) === -1) {
+                        this.undo.push(copiedData)
+                    }
                     this.$forceUpdate()
                 }
             },
-            mouseDownOnCell(column, row) {
+            mouseDownOnCell(column, row, value) {
+                this.selectCell(column, row, value)
                 if (this.activeCell && this.activeCell.column === column && this.activeCell.row === row && !this.mouseIsDownInSelectedCell) {
                     this.mouseIsDownOnCell = true
                 }
             },
-            mouseIsMovingForMultiRows(header, row) {
+            mouseIsMovingForMultiRows(header, row, event) {
                 if (!this.mouseIsDownOnCell) {
                     return;
                 }
 
+                this.scrollBasedOnSelection(event)
+
                 this.selectedRowsToBeSelected = []
 
-                let indexOfStartHeader = this.headers.indexOf(this.activeCell.column)
-                let indexOfEndHeader = this.headers.indexOf(header)
+                let indexOfStartHeader = this.copiedHeaders.indexOf(this.activeCell.column)
+                let indexOfEndHeader = this.copiedHeaders.indexOf(header)
                 let indexOfStartRow = this.activeCell.row
                 let indexOfEndRow = row
 
@@ -358,14 +476,33 @@
 
                 for (let j = startOfRow; j <= endOfRow; j++) {
                     for (let i = startOfHeader; i <= endOfHeader; i++) {
-                        this.selectedRowsToBeSelected.push({header: this.headers[i], row: j})
+                        this.selectedRowsToBeSelected.push({header: this.copiedHeaders[i], row: j})
                     }
                 }
             },
-            mouseIsMoving(header, row) {
+            scrollBasedOnSelection(event) {
+                if (event.clientX > this.$refs.headers.clientWidth - this.cellWidth) {
+                    this.$refs.body.scroll({left: this.$refs.body.scrollLeft + 20, top: this.$refs.body.scrollTop})
+                }
+
+                if (event.clientX < this.cellWidth * 3) {
+                    this.$refs.body.scroll({left: this.$refs.body.scrollLeft - 20, top: this.$refs.body.scrollTop})
+                }
+
+                if (event.clientY > this.$refs.body.clientHeight - (this.cellHeight * 2)) {
+                    this.$refs.body.scroll({left: this.$refs.body.scrollLeft, top: this.$refs.body.scrollTop + 20})
+                }
+
+                if (event.clientY < this.cellHeight * 3) {
+                    this.$refs.body.scroll({left: this.$refs.body.scrollLeft, top: this.$refs.body.scrollTop - 20})
+                }
+            },
+            mouseIsMoving(header, row, event) {
                 if (!this.mouseIsDownInSelectedCell) {
                     return;
                 }
+
+                this.scrollBasedOnSelection(event)
 
                 if (header === this.activeCell.column) {
                     this.selectedRowsToBeChanged = []
@@ -386,14 +523,14 @@
                 if (header !== this.activeCell.column && row === this.activeCell.row) {
                     this.selectedRowsToBeChanged = []
 
-                    let indexOf1 = this.headers.indexOf(this.activeCell.column)
-                    let indexOf2 = this.headers.indexOf(header)
+                    let indexOf1 = this.copiedHeaders.indexOf(this.activeCell.column)
+                    let indexOf2 = this.copiedHeaders.indexOf(header)
 
                     let start = indexOf1 < indexOf2 ? indexOf1 : indexOf2
                     let end = indexOf1 > indexOf2 ? indexOf1 : indexOf2
 
                     for (let i = start; i <= end; i++) {
-                        this.selectedRowsToBeChanged.push({header: this.headers[i], row: row})
+                        this.selectedRowsToBeChanged.push({header: this.copiedHeaders[i], row: row})
                     }
                     this.cellWhereCopyButtonIs = {
                         column: header,
@@ -403,14 +540,14 @@
                 }
             },
             hasComment(header, row) {
-                return this.cellsWithComments.find(c => c.row === row && this.headers.indexOf(header) === c.column)
+                return this.cellsWithComments.find(c => c.row === row && this.copiedHeaders.indexOf(header) === c.column)
             },
             showDropdown(column, row, event) {
                 if (this.showDropDown.column) {
                     this.showDropDown = {column: null, key: null}
                     return
                 }
-                let hasComment = this.hasComment(this.headers[column], row + 1)
+                let hasComment = this.hasComment(this.copiedHeaders[column], row + 1)
                 if (column && hasComment) {
                     this.showDropDown = {...hasComment, event}
                 }
@@ -419,31 +556,74 @@
                 this.showDropDown.comment = e
             },
             manipulateRows(event) {
-                if(event === 'insert-row-up') {
-                    this.rows.splice(this.cellPopup.row - 1, 0, Array(this.longestArray))
+                if (event === 'insert-row-up') {
+                    this.copiedRows.splice(this.cellPopup.row - 1, 0, Array(this.longestArray))
                     this.cellPopup = null
                 }
 
-                if(event === 'insert-row-down') {
-                    this.rows.splice(this.cellPopup.row, 0, Array(this.longestArray))
+                if (event === 'insert-row-down') {
+                    this.copiedRows.splice(this.cellPopup.row, 0, Array(this.longestArray))
                     this.cellPopup = null
                 }
 
-                if(event === 'insert-column-right') {
-                    this.rows.forEach(r => r.splice(this.cellPopup.column + 1, 0, null))
+                if (event === 'insert-column-right') {
+                    let column = this.cellPopup ? this.cellPopup.column : this.selectedHeader.header_key
+                    this.copiedRows.forEach(r => r.splice(column + 1, 0, null))
+                    this.cellPopup = null
+                    this.selectedHeader = null
+                }
+
+                if (event === 'insert-column-left') {
+                    let column = this.cellPopup ? this.cellPopup.column : this.selectedHeader.header_key
+                    this.copiedRows.forEach(r => r.splice(column, 0, null))
+                    this.selectedHeader = null
                     this.cellPopup = null
                 }
 
-                if(event === 'insert-column-left') {
-                    this.rows.forEach(r => r.splice(this.cellPopup.column, 0, null))
+                if (event === 'delete-column') {
+                    let column = this.cellPopup ? this.cellPopup.column : this.selectedHeader.header_key
+                    this.copiedRows.forEach(r => r.splice(column, 1))
                     this.cellPopup = null
                 }
+
+                if (event === 'delete-row') {
+                    this.copiedRows.splice(this.cellPopup.row - 1, 1)
+                    this.cellPopup = null
+                }
+
+                if (event === 'copy') {
+                    let copiedData = this.copiedRows.map(r => r[this.selectedHeader.header_key]).join('\n')
+                    this.copyToClipBoard(copiedData)
+                    this.cellPopup = null
+                }
+
                 this.calculateHeaders()
+            },
+            selectedHeaderCell(e) {
+                this.selectedHeader = {...e, header_key: this.copiedHeaders.indexOf(e.header)}
+            },
+            stopEditingCell() {
+                this.editingCell = null
+            },
+            undoFunction() {
+                this.selectedRowsToBeChanged = []
+                this.selectedRowsToBeSelected = []
+                this.activeCell = null
+                this.cellWhereCopyButtonIs = null
+
+                if(this.undo.length === 0) {
+                    return;
+                }
+
+                let poped = this.undo.pop()
+                poped.forEach(p => {
+                    this.copiedRows[p.row][p.column] = p.value
+                })
             }
         },
         beforeDestroy() {
             window.removeEventListener('keydown', this.keyDownEventListener)
-        }
+        },
     }
 </script>
 
@@ -459,7 +639,7 @@
         display: flex;
         flex-direction: column;
         max-height: 400px;
-        max-width: 700px;
+        max-width: 1000px;
         border-right: 1px solid $border;
         border-bottom: 1px solid $border;
         user-select: none;
@@ -551,6 +731,15 @@
                 box-sizing: border-box;
                 font-weight: 200;
 
+                .edit-input {
+                    width: 95%;
+                    height: 95%;
+                    font-size: 16px;
+                    text-align: center;
+                    color: #2c2c2c;
+                    font-weight: 300;
+                }
+
                 &:not(:last-child) {
                     border-right: 1px solid $border;
                 }
@@ -572,6 +761,10 @@
                     background: $headers;
                 }
 
+                &.disabled-main-cell {
+                    color: lighten(black, 30%);
+                }
+
                 .small-button {
                     position: absolute;
                     height: 6px;
@@ -587,7 +780,7 @@
     }
 
     .static-cell {
-        min-width: var(--var-cell-width);
+        min-width: var(--var-cell-width-plus-one);
         background: $headers;
         border: 1px solid $darker-border;
     }

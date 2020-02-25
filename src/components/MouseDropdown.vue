@@ -4,6 +4,8 @@
         <div @click="$emit('manipulateRows', 'insert-row-down')">Insert row below</div>
         <div @click="$emit('manipulateRows', 'insert-column-right')">Insert column right</div>
         <div @click="$emit('manipulateRows', 'insert-column-left')">Insert column left</div>
+        <div @click="$emit('manipulateRows', 'delete-row')">Delete row</div>
+        <div @click="$emit('manipulateRows', 'delete-column')">Delete column</div>
     </div>
 </template>
 
@@ -11,7 +13,7 @@
     import ClickOutside from 'vue-click-outside'
     export default {
         name: "MouseDropdown",
-        props: ['clickDetails'],
+        props: ['clickDetails', 'cell'],
         mounted() {
         },
         computed: {
@@ -20,7 +22,7 @@
                     left: `${this.clickDetails.clientX}px`,
                     top: `${this.clickDetails.clientY}px`,
                 }
-            }
+            },
         },
         methods: {
             hide() {
@@ -37,7 +39,7 @@
     .mouse-dropdown {
         position: absolute;
         width: 160px;
-        height: 150px;
+        height: auto;
         border: 2px solid #dadada;
         display: flex;
         flex-direction: column;

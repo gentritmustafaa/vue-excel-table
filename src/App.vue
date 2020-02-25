@@ -15,9 +15,7 @@
 </script>
 
 <style lang="scss">
-  #id {
+  #app {
     display: flex;
-    justify-content: center;
-    margin-top: 100px;
   }
 </style>

@@ -9,5 +9,5 @@ import VueExcelTable from '@/components/VueExcelTable'
 export default VueExcelTable
 
 new Vue({
-  render: h => h(App)
+    render: h => h(App)
 }).$mount('#app')

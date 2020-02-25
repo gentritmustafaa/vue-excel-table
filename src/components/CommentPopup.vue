@@ -1,5 +1,5 @@
 <template>
-    <textarea @input="$emit('change', model)" v-model="model"
+    <textarea @mouseleave="hide" @input="$emit('change', model)" v-model="model"
               class="container" :style="style"
               cols="5" rows="5"></textarea>
 </template>
@@ -8,7 +8,7 @@
     import ClickOutside from 'vue-click-outside'
 
     export default {
-        name: "dropdown",
+        name: "commentPopup",
         props: ['value'],
         data() {
             return {
