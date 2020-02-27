@@ -1,9 +1,9 @@
 <template>
-    <div class="excel" v-if="copiedRows.length > 0" @mouseup="mouseIsDownInSelectedCell && mouseDown(false), mouseIsDownOnCell = false"
+    <div class="excel" v-if="copiedRows.length > 0"
+         @mouseup="mouseIsDownInSelectedCell && mouseDown(false), mouseIsDownOnCell = false"
          :style="cssProps">
         <div class="flexed">
             <div class="static-cell">
-                <button @click="undoFunction()">Undo</button>
             </div>
             <div class="excel__headers" ref="headers">
                 <div class="excel__header--cell"
@@ -24,10 +24,8 @@
                  ref="body"
                  @scroll="handleScroll">
                 <div class="excel__body--row" v-for="(row, rowKey) in copiedRows">
-                    <!--@click="selectCell(copiedHeaders[cellKey], rowKey+1)"-->
                     <div class="excel__body--cell"
-                         @dblclick="editingCell = {column: cellKey, row: row}"
-                         :id="`${copiedHeaders[cellKey]}-${rowKey+1}`"
+                         @dblclick="cellToBeEdited(cellKey, rowKey, row[cellKey])"
                          @contextmenu="rightMouseClick($event, cellKey, rowKey + 1)"
                          @mousedown="mouseDownOnCell(copiedHeaders[cellKey], rowKey + 1, row[cellKey])"
                          @mousemove="mouseIsMoving(copiedHeaders[cellKey], rowKey+1, $event), mouseIsMovingForMultiRows(copiedHeaders[cellKey], rowKey + 1, $event)"
@@ -39,7 +37,7 @@
                         <input v-model="row[cellKey]"
                                v-click-outside="stopEditingCell"
                                autofocus
-                               v-if="editingCell && editingCell.column === cellKey && editingCell.row === row"
+                               v-if="editingCell && editingCell.column === cellKey && editingCell.row === rowKey"
                                class="edit-input"
                                type="text">
                         <span v-else>
@@ -86,6 +84,7 @@
     import HeaderCell from './HeaderCell'
     import DropDownForHeader from './DropDownForHeader'
     import ClickOutside from 'vue-click-outside'
+    import CommonUtils from './../utils/utils'
 
     export default {
         name: "VueExcelTable",
@@ -200,28 +199,7 @@
                     }
                 }
 
-                let lowerColumn = this.copiedHeaders.indexOf(this.activeCell.column) <= this.selectedRowsToBeChanged[this.selectedRowsToBeChanged.length - 1].header
-
-                if (this.selectedRowsToBeChanged.every(x => x.row === this.activeCell.row)) {
-
-                    let left = this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1
-
-                    return {
-                        'position': 'absolute',
-                        'left': `${left + (lowerColumn ? this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) : 0)}px`,
-                        'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
-                        'border': '1px solid red',
-                        'height': `${this.cellHeight}px`
-                    }
-                }
-
-                return {
-                    'position': 'absolute',
-                    'left': `${this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1}px`,
-                    'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
-                    'border': '1px solid red',
-                    'height': `${this.selectedRowsToBeChanged.length * this.cellHeight}px`
-                }
+                return CommonUtils.leftVerticalLine(this.selectedRowsToBeChanged, this.copiedHeaders, this.activeCell, this.cellWidth, this.cellHeight)
             },
             rightVerticalLine() {
                 if (this.selectedRowsToBeChanged.length === 0 || this.mouseIsDownOnCell) {
@@ -230,28 +208,7 @@
                     }
                 }
 
-                if (this.selectedRowsToBeChanged.every(x => x.row === this.activeCell.row)) {
-
-                    let lowerColumn = this.copiedHeaders.indexOf(this.activeCell.column) > this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header)
-                    let left = lowerColumn ? this.copiedHeaders.indexOf(this.activeCell.column) * this.cellWidth : this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[this.selectedRowsToBeChanged.length - 1].header) * this.cellWidth
-
-
-                    return {
-                        'position': 'absolute',
-                        'left': `${left + this.cellWidth - 1}px`,
-                        'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
-                        'border': '1px solid red',
-                        'height': `${this.cellHeight}px`
-                    }
-                }
-
-                return {
-                    'position': 'absolute',
-                    'left': `${(this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) + 1) * this.cellWidth - 1}px`,
-                    'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
-                    'border': '1px solid red',
-                    'height': `${this.selectedRowsToBeChanged.length * this.cellHeight + 1}px`
-                }
+                return CommonUtils.rightVerticalLine(this.selectedRowsToBeChanged, this.copiedHeaders, this.activeCell, this.cellWidth, this.cellHeight)
             },
             topHorizontalLine() {
                 if (this.selectedRowsToBeChanged.length === 0 || this.mouseIsDownOnCell) {
@@ -260,23 +217,7 @@
                     }
                 }
 
-                if (this.selectedRowsToBeChanged.every(x => x.row === this.activeCell.row)) {
-                    return {
-                        'position': 'absolute',
-                        'left': `${this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1}px`,
-                        'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
-                        'border': '1px solid red',
-                        'width': `${this.cellWidth * this.selectedRowsToBeChanged.length}px`
-                    }
-                }
-
-                return {
-                    'position': 'absolute',
-                    'left': `${this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth - 1}px`,
-                    'top': `${(this.selectedRowsToBeChanged[0].row - 1) * this.cellHeight}px`,
-                    'border': '1px solid red',
-                    'width': `${this.cellWidth}px`
-                }
+                return CommonUtils.topHorizontalLine(this.selectedRowsToBeChanged, this.copiedHeaders, this.activeCell, this.cellWidth, this.cellHeight)
             },
             bottomHorizontalLine() {
                 if (this.selectedRowsToBeChanged.length === 0 || this.mouseIsDownOnCell) {
@@ -285,24 +226,7 @@
                     }
                 }
 
-                let lowerColumn = this.copiedHeaders.indexOf(this.activeCell.column) > this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header)
-
-                if (this.selectedRowsToBeChanged.length > 1 && this.selectedRowsToBeChanged.every(x => x.row === this.activeCell.row)) {
-                    return {
-                        'position': 'absolute',
-                        'left': `${this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth}px`,
-                        'top': `${(this.selectedRowsToBeChanged[0].row) * this.cellHeight}px`,
-                        'border': '1px solid red',
-                        'width': `${this.cellWidth * this.selectedRowsToBeChanged.length - 1}px`
-                    }
-                }
-                return {
-                    'position': 'absolute',
-                    'left': `${this.copiedHeaders.indexOf(this.selectedRowsToBeChanged[0].header) * this.cellWidth}px`,
-                    'top': `${(this.selectedRowsToBeChanged[this.selectedRowsToBeChanged.length - 1].row) * this.cellHeight + (lowerColumn ? +1 : 0)}px`,
-                    'border': '1px solid red',
-                    'width': `${this.cellWidth - 1}px`
-                }
+                return CommonUtils.bottomHorizontalLine(this.selectedRowsToBeChanged, this.copiedHeaders, this.activeCell, this.cellWidth, this.cellHeight)
             },
             styleOfCopyButton() {
                 if (!this.cellWhereCopyButtonIs) {
@@ -370,8 +294,13 @@
                 }
             },
             keyDownEventListener(event) {
-                if (event.alt && event.keyCode === 67) {
+                if ((event.ctrlKey || event.metaKey) && event.which === 67) {
                     this.copy()
+                    event.preventDefault()
+                }
+
+                if ((event.ctrlKey || event.metaKey) && event.which === 90) {
+                    this.undoFunction()
                     event.preventDefault()
                 }
             },
@@ -603,7 +532,18 @@
                 this.selectedHeader = {...e, header_key: this.copiedHeaders.indexOf(e.header)}
             },
             stopEditingCell() {
+                let {column, row, value} = this.editingCell
+                if (this.copiedRows[row][column] !== value) {
+                    this.undo.push([{
+                        column,
+                        row,
+                        value
+                    }])
+                }
                 this.editingCell = null
+            },
+            cellToBeEdited(column, row, value) {
+                this.editingCell = {column, row, value}
             },
             undoFunction() {
                 this.selectedRowsToBeChanged = []
@@ -611,7 +551,7 @@
                 this.activeCell = null
                 this.cellWhereCopyButtonIs = null
 
-                if(this.undo.length === 0) {
+                if (this.undo.length === 0) {
                     return;
                 }
 
